@@ -1,0 +1,7 @@
+{
+  "name": "open-library-app",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}
