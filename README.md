@@ -28,22 +28,24 @@ ionic serve
 - **lazy loading**: cada pagina se carga solo cuando se necesita
 - **separacion de responsabilidades**: services para logica, pages para UI, models para tipos
 
-### offline
+### persistencia offline (SQLite)
 - con internet: trae de la API y guarda en SQLite
-- sin internet: lee de SQLite
+- sin internet: lee de SQLite (cache local)
 - si falla la API: usa el cache
-
+- en mobile usa SQLite real (@capacitor-community/sqlite)
+- en web usa localStorage como fallback para desarrollo
 
 ### estados de UI
 ```typescript
 enum ViewState {
-  LOADING = 'loading',
-  SUCCESS = 'success',
-  ERROR = 'error',
-  EMPTY = 'empty'
+  LOADING = 'loading',   // cargando datos
+  SUCCESS = 'success',   // datos cargados
+  ERROR = 'error',       // error de red/api
+  EMPTY = 'empty',       // sin resultados (con internet)
+  OFFLINE = 'offline'    // sin conexion Y sin datos en cache
 }
 ```
-cada pagina maneja estos 4 estados con componentes reutilizables (loading-state, error-state, empty-state)
+cada pagina maneja estos 5 estados con componentes reutilizables (loading-state, error-state, empty-state)
 
 ### ciclo de vida ionic
 - uso de `ionViewWillEnter` en vez de `ngOnInit` para cargar datos

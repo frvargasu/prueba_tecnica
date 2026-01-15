@@ -84,6 +84,15 @@ import {
         [message]="emptyMessage"
       ></app-empty-state>
 
+      <!-- Offline State (buscó pero sin conexión y sin cache) -->
+      <app-empty-state 
+        *ngIf="viewState === ViewState.OFFLINE"
+        icon="cloud-offline-outline"
+        title="Sin conexión"
+        message="No hay resultados guardados. Conéctate a internet para buscar en línea."
+        [showAction]="false"
+      ></app-empty-state>
+
       <!-- Search Results -->
       <div *ngIf="viewState === ViewState.SUCCESS" class="results-container">
         <div class="results-info">
@@ -272,10 +281,11 @@ export class SearchPage implements OnInit, OnDestroy, ViewWillEnter {
       this.hasMore = response.hasMore;
 
       if (this.books.length === 0) {
-        this.viewState = ViewState.EMPTY;
+        // Sin conexión Y sin resultados = estado OFFLINE
         if (!this.networkStatus.connected) {
-          this.emptyMessage = 'No hay resultados guardados. Conéctate a internet para buscar en línea.';
+          this.viewState = ViewState.OFFLINE;
         } else {
+          this.viewState = ViewState.EMPTY;
           this.emptyMessage = 'No se encontraron libros con ese criterio de búsqueda';
         }
       } else {

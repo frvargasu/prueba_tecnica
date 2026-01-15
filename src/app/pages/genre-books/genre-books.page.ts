@@ -66,9 +66,18 @@ import {
         icon="book-outline"
         title="Sin libros"
         [message]="emptyMessage"
-        [showAction]="!networkStatus.connected"
+        [showAction]="networkStatus.connected"
         actionText="Reintentar"
         (actionClick)="loadBooks()"
+      ></app-empty-state>
+
+      <!-- Offline State (sin conexión Y sin datos) -->
+      <app-empty-state 
+        *ngIf="viewState === ViewState.OFFLINE"
+        icon="cloud-offline-outline"
+        title="Sin conexión"
+        message="No hay libros guardados para este género. Conéctate a internet para cargarlos."
+        [showAction]="false"
       ></app-empty-state>
 
       <!-- Books List -->
@@ -215,9 +224,11 @@ export class GenreBooksPage implements OnInit, OnDestroy, ViewWillEnter {
       this.hasMore = response.hasMore;
 
       if (this.books.length === 0) {
-        this.viewState = ViewState.EMPTY;
+        // Sin conexión Y sin datos = estado OFFLINE
         if (!this.networkStatus.connected) {
-          this.emptyMessage = 'No hay libros guardados para modo offline. Conéctate a internet para cargar libros.';
+          this.viewState = ViewState.OFFLINE;
+        } else {
+          this.viewState = ViewState.EMPTY;
         }
       } else {
         this.viewState = ViewState.SUCCESS;

@@ -13,7 +13,8 @@ const DB_NAME = 'openlibrary_db';
 const STORAGE_KEYS = {
   LISTS: 'openlibrary_lists',
   LIST_BOOKS: 'openlibrary_list_books',
-  CACHED_BOOKS: 'openlibrary_cached_books'
+  CACHED_BOOKS: 'openlibrary_cached_books',
+  GENRE_BOOKS: 'openlibrary_genre_books'
 };
 
 /**
@@ -341,7 +342,25 @@ export class DatabaseService {
    * Save books for a genre (cache)
    */
   async saveBooksForGenre(genreId: string, books: Book[], startPosition: number = 0): Promise<void> {
-    if (!this.hasDb()) return;
+    // Web: usar localStorage
+    if (!this.hasDb()) {
+      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
+      
+      // Si es la primera pagina, reemplazar. Si no, agregar
+      if (startPosition === 0) {
+        genreBooks[genreId] = books;
+      } else {
+        const existing = genreBooks[genreId] || [];
+        // Agregar solo los nuevos (evitar duplicados)
+        const existingKeys = new Set(existing.map(b => b.key));
+        const newBooks = books.filter(b => !existingKeys.has(b.key));
+        genreBooks[genreId] = [...existing, ...newBooks];
+      }
+      
+      this.saveToStorage(STORAGE_KEYS.GENRE_BOOKS, genreBooks);
+      return;
+    }
+
     const db = this.getDb();
 
     // Save all books first
@@ -360,7 +379,16 @@ export class DatabaseService {
    * Get cached books for a genre
    */
   async getBooksForGenre(genreId: string, page: number = 1, limit: number = 20): Promise<{ books: Book[]; total: number }> {
-    if (!this.hasDb()) return { books: [], total: 0 };
+    // Web: usar localStorage
+    if (!this.hasDb()) {
+      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
+      const allBooks = genreBooks[genreId] || [];
+      const total = allBooks.length;
+      const offset = (page - 1) * limit;
+      const books = allBooks.slice(offset, offset + limit);
+      return { books, total };
+    }
+
     const db = this.getDb();
     const offset = (page - 1) * limit;
 
@@ -395,7 +423,12 @@ export class DatabaseService {
    * Check if genre has cached books
    */
   async hasGenreCache(genreId: string): Promise<boolean> {
-    if (!this.hasDb()) return false;
+    // Web: usar localStorage
+    if (!this.hasDb()) {
+      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
+      return (genreBooks[genreId]?.length || 0) > 0;
+    }
+
     const db = this.getDb();
     const result = await db.query(
       'SELECT COUNT(*) as count FROM genre_books WHERE genre_id = ?',
@@ -408,7 +441,14 @@ export class DatabaseService {
    * Clear genre cache
    */
   async clearGenreCache(genreId: string): Promise<void> {
-    if (!this.hasDb()) return;
+    // Web: usar localStorage
+    if (!this.hasDb()) {
+      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
+      delete genreBooks[genreId];
+      this.saveToStorage(STORAGE_KEYS.GENRE_BOOKS, genreBooks);
+      return;
+    }
+
     const db = this.getDb();
     await db.run('DELETE FROM genre_books WHERE genre_id = ?', [genreId]);
   }
