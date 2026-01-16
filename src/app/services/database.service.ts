@@ -10,6 +10,8 @@ import {
 import { Book, Author, CustomList, CustomListBook } from '../models';
 
 const DB_NAME = 'openlibrary_db';
+
+// Keys para localStorage (fallback web)
 const STORAGE_KEYS = {
   LISTS: 'openlibrary_lists',
   LIST_BOOKS: 'openlibrary_list_books',
@@ -100,27 +102,8 @@ export class DatabaseService {
     this.platform = Capacitor.getPlatform();
   }
 
-  // ==================== LOCALSTORAGE HELPERS (WEB) ====================
-
-  private getFromStorage<T>(key: string, defaultValue: T): T {
-    try {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : defaultValue;
-    } catch {
-      return defaultValue;
-    }
-  }
-
-  private saveToStorage<T>(key: string, data: T): void {
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch (e) {
-      console.error('Error saving to localStorage:', e);
-    }
-  }
-
   /**
-   * Check if running on native platform (SQLite available)
+   * Check if running on native platform
    */
   isNative(): boolean {
     return Capacitor.isNativePlatform();
@@ -188,9 +171,6 @@ export class DatabaseService {
    * Returns null on web platform (no SQLite support)
    */
   private getDb(): SQLiteDBConnection {
-    if (!this.isNative()) {
-      throw new Error('SQLite not available on web platform');
-    }
     if (!this.db) {
       throw new Error('Database not initialized. Call initializeDatabase() first.');
     }
@@ -201,7 +181,45 @@ export class DatabaseService {
    * Check if database is available
    */
   private hasDb(): boolean {
-    return this.isNative() && this.db !== null;
+    return this.db !== null && this.isInitialized;
+  }
+
+  // ==================== LOCAL STORAGE HELPERS (Web Fallback) ====================
+
+  /**
+   * Get data from localStorage
+   */
+  private getFromStorage<T>(key: string, defaultValue: T): T {
+    try {
+      const data = localStorage.getItem(key);
+      return data ? JSON.parse(data) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  }
+
+  /**
+   * Save data to localStorage
+   */
+  private saveToStorage<T>(key: string, data: T): void {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+      console.error('Error saving to localStorage:', e);
+    }
+  }
+
+  /**
+   * Save to web store (for persistence in web)
+   */
+  private async saveToWebStore(): Promise<void> {
+    if (this.platform === 'web' && this.db) {
+      try {
+        await this.sqlite.saveToStore(DB_NAME);
+      } catch (e) {
+        console.error('Error saving to web store:', e);
+      }
+    }
   }
 
   // ==================== BOOK OPERATIONS ====================
@@ -210,7 +228,13 @@ export class DatabaseService {
    * Save a book to the database
    */
   async saveBook(book: Book): Promise<void> {
-    if (!this.hasDb()) return;
+    if (!this.hasDb()) {
+      // Fallback: guardar en localStorage
+      const cachedBooks = this.getFromStorage<{[key: string]: Book}>(STORAGE_KEYS.CACHED_BOOKS, {});
+      cachedBooks[book.key] = book;
+      this.saveToStorage(STORAGE_KEYS.CACHED_BOOKS, cachedBooks);
+      return;
+    }
     const db = this.getDb();
     
     const sql = `
@@ -281,7 +305,11 @@ export class DatabaseService {
    * Get a book by key
    */
   async getBook(key: string): Promise<Book | null> {
-    if (!this.hasDb()) return null;
+    if (!this.hasDb()) {
+      // Fallback: buscar en localStorage
+      const cachedBooks = this.getFromStorage<{[key: string]: Book}>(STORAGE_KEYS.CACHED_BOOKS, {});
+      return cachedBooks[key] || null;
+    }
     const db = this.getDb();
 
     const result = await db.query('SELECT * FROM books WHERE key = ?', [key]);
@@ -342,22 +370,23 @@ export class DatabaseService {
    * Save books for a genre (cache)
    */
   async saveBooksForGenre(genreId: string, books: Book[], startPosition: number = 0): Promise<void> {
-    // Web: usar localStorage
     if (!this.hasDb()) {
-      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
-      
-      // Si es la primera pagina, reemplazar. Si no, agregar
-      if (startPosition === 0) {
-        genreBooks[genreId] = books;
-      } else {
-        const existing = genreBooks[genreId] || [];
-        // Agregar solo los nuevos (evitar duplicados)
-        const existingKeys = new Set(existing.map(b => b.key));
-        const newBooks = books.filter(b => !existingKeys.has(b.key));
-        genreBooks[genreId] = [...existing, ...newBooks];
+      // Fallback: guardar en localStorage
+      const genreBooks = this.getFromStorage<{[id: string]: Book[]}>(STORAGE_KEYS.GENRE_BOOKS, {});
+      if (!genreBooks[genreId]) genreBooks[genreId] = [];
+      // Agregar libros sin duplicados
+      for (const book of books) {
+        if (!genreBooks[genreId].find(b => b.key === book.key)) {
+          genreBooks[genreId].push(book);
+        }
       }
-      
       this.saveToStorage(STORAGE_KEYS.GENRE_BOOKS, genreBooks);
+      // También guardar en cache de libros
+      const cachedBooks = this.getFromStorage<{[key: string]: Book}>(STORAGE_KEYS.CACHED_BOOKS, {});
+      for (const book of books) {
+        cachedBooks[book.key] = book;
+      }
+      this.saveToStorage(STORAGE_KEYS.CACHED_BOOKS, cachedBooks);
       return;
     }
 
@@ -373,20 +402,21 @@ export class DatabaseService {
         [genreId, books[i].key, startPosition + i]
       );
     }
+
+    await this.saveToWebStore();
   }
 
   /**
    * Get cached books for a genre
    */
   async getBooksForGenre(genreId: string, page: number = 1, limit: number = 20): Promise<{ books: Book[]; total: number }> {
-    // Web: usar localStorage
     if (!this.hasDb()) {
-      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
+      // Fallback: obtener de localStorage
+      const genreBooks = this.getFromStorage<{[id: string]: Book[]}>(STORAGE_KEYS.GENRE_BOOKS, {});
       const allBooks = genreBooks[genreId] || [];
-      const total = allBooks.length;
       const offset = (page - 1) * limit;
       const books = allBooks.slice(offset, offset + limit);
-      return { books, total };
+      return { books, total: allBooks.length };
     }
 
     const db = this.getDb();
@@ -423,9 +453,9 @@ export class DatabaseService {
    * Check if genre has cached books
    */
   async hasGenreCache(genreId: string): Promise<boolean> {
-    // Web: usar localStorage
     if (!this.hasDb()) {
-      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
+      // Fallback: verificar en localStorage
+      const genreBooks = this.getFromStorage<{[id: string]: Book[]}>(STORAGE_KEYS.GENRE_BOOKS, {});
       return (genreBooks[genreId]?.length || 0) > 0;
     }
 
@@ -441,16 +471,11 @@ export class DatabaseService {
    * Clear genre cache
    */
   async clearGenreCache(genreId: string): Promise<void> {
-    // Web: usar localStorage
-    if (!this.hasDb()) {
-      const genreBooks = this.getFromStorage<Record<string, Book[]>>(STORAGE_KEYS.GENRE_BOOKS, {});
-      delete genreBooks[genreId];
-      this.saveToStorage(STORAGE_KEYS.GENRE_BOOKS, genreBooks);
-      return;
-    }
+    if (!this.hasDb()) return;
 
     const db = this.getDb();
     await db.run('DELETE FROM genre_books WHERE genre_id = ?', [genreId]);
+    await this.saveToWebStore();
   }
 
   // ==================== CUSTOM LIST OPERATIONS ====================
@@ -470,7 +495,7 @@ export class DatabaseService {
     };
     
     if (!this.hasDb()) {
-      // Web platform - use localStorage
+      // Fallback: guardar en localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
       lists.push(newList);
       this.saveToStorage(STORAGE_KEYS.LISTS, lists);
@@ -482,7 +507,8 @@ export class DatabaseService {
       'INSERT INTO custom_lists (id, name, description) VALUES (?, ?, ?)',
       [id, name.trim(), description?.trim() || null]
     );
-
+    
+    await this.saveToWebStore();
     return newList;
   }
 
@@ -491,9 +517,9 @@ export class DatabaseService {
    */
   async getCustomLists(): Promise<CustomList[]> {
     if (!this.hasDb()) {
-      // Web platform - use localStorage
+      // Fallback: obtener de localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
-      const listBooks = this.getFromStorage<{[listId: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
+      const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       return lists.map(list => ({
         ...list,
         createdAt: new Date(list.createdAt),
@@ -501,6 +527,7 @@ export class DatabaseService {
         bookCount: (listBooks[list.id] || []).length
       }));
     }
+
     const db = this.getDb();
 
     const result = await db.query(`
@@ -528,18 +555,19 @@ export class DatabaseService {
    */
   async getCustomList(listId: string): Promise<CustomList | null> {
     if (!this.hasDb()) {
-      // Web platform - use localStorage
+      // Fallback: obtener de localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
-      const listBooks = this.getFromStorage<{[listId: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
+      const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       const list = lists.find(l => l.id === listId);
       if (!list) return null;
       return {
         ...list,
         createdAt: new Date(list.createdAt),
         updatedAt: new Date(list.updatedAt),
-        bookCount: (listBooks[listId] || []).length
+        bookCount: (listBooks[list.id] || []).length
       };
     }
+
     const db = this.getDb();
 
     const result = await db.query(`
@@ -568,9 +596,11 @@ export class DatabaseService {
    */
   async getCustomListsCount(): Promise<number> {
     if (!this.hasDb()) {
+      // Fallback: obtener de localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
       return lists.length;
     }
+
     const db = this.getDb();
     const result = await db.query('SELECT COUNT(*) as count FROM custom_lists');
     return result.values?.[0]?.count || 0;
@@ -581,10 +611,15 @@ export class DatabaseService {
    */
   async listNameExists(name: string, excludeId?: string): Promise<boolean> {
     if (!this.hasDb()) {
+      // Fallback: verificar en localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
       const normalizedName = name.trim().toLowerCase();
-      return lists.some(l => l.name.toLowerCase() === normalizedName && l.id !== excludeId);
+      return lists.some(l => 
+        l.name.toLowerCase() === normalizedName && 
+        (!excludeId || l.id !== excludeId)
+      );
     }
+
     const db = this.getDb();
     const normalizedName = name.trim().toLowerCase();
     
@@ -605,14 +640,18 @@ export class DatabaseService {
    */
   async updateCustomList(listId: string, name: string, description?: string): Promise<void> {
     if (!this.hasDb()) {
+      // Fallback: actualizar en localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
-      const idx = lists.findIndex(l => l.id === listId);
-      if (idx >= 0) {
-        lists[idx] = { ...lists[idx], name: name.trim(), description: description?.trim(), updatedAt: new Date() };
+      const index = lists.findIndex(l => l.id === listId);
+      if (index !== -1) {
+        lists[index].name = name.trim();
+        lists[index].description = description?.trim();
+        lists[index].updatedAt = new Date();
         this.saveToStorage(STORAGE_KEYS.LISTS, lists);
       }
       return;
     }
+
     const db = this.getDb();
 
     await db.run(
@@ -621,6 +660,8 @@ export class DatabaseService {
        WHERE id = ?`,
       [name.trim(), description?.trim() || null, listId]
     );
+    
+    await this.saveToWebStore();
   }
 
   /**
@@ -628,17 +669,20 @@ export class DatabaseService {
    */
   async deleteCustomList(listId: string): Promise<void> {
     if (!this.hasDb()) {
-      let lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
-      lists = lists.filter(l => l.id !== listId);
-      this.saveToStorage(STORAGE_KEYS.LISTS, lists);
-      // Also remove list books
+      // Fallback: eliminar de localStorage
+      const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
+      const filtered = lists.filter(l => l.id !== listId);
+      this.saveToStorage(STORAGE_KEYS.LISTS, filtered);
+      // Eliminar libros de la lista
       const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       delete listBooks[listId];
       this.saveToStorage(STORAGE_KEYS.LIST_BOOKS, listBooks);
       return;
     }
+
     const db = this.getDb();
     await db.run('DELETE FROM custom_lists WHERE id = ?', [listId]);
+    await this.saveToWebStore();
   }
 
   /**
@@ -646,11 +690,11 @@ export class DatabaseService {
    */
   async addBookToList(listId: string, book: Book): Promise<void> {
     if (!this.hasDb()) {
-      // Save book to cache
+      // Fallback: agregar en localStorage
       const cachedBooks = this.getFromStorage<{[key: string]: Book}>(STORAGE_KEYS.CACHED_BOOKS, {});
       cachedBooks[book.key] = book;
       this.saveToStorage(STORAGE_KEYS.CACHED_BOOKS, cachedBooks);
-      // Add to list
+      
       const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       if (!listBooks[listId]) listBooks[listId] = [];
       if (!listBooks[listId].includes(book.key)) {
@@ -682,6 +726,7 @@ export class DatabaseService {
    */
   async removeBookFromList(listId: string, bookKey: string): Promise<void> {
     if (!this.hasDb()) {
+      // Fallback: eliminar de localStorage
       const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       if (listBooks[listId]) {
         listBooks[listId] = listBooks[listId].filter(k => k !== bookKey);
@@ -708,6 +753,7 @@ export class DatabaseService {
    */
   async isBookInList(listId: string, bookKey: string): Promise<boolean> {
     if (!this.hasDb()) {
+      // Fallback: verificar en localStorage
       const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       return (listBooks[listId] || []).includes(bookKey);
     }
@@ -726,6 +772,7 @@ export class DatabaseService {
    */
   async getBooksInList(listId: string): Promise<Book[]> {
     if (!this.hasDb()) {
+      // Fallback: obtener de localStorage
       const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       const cachedBooks = this.getFromStorage<{[key: string]: Book}>(STORAGE_KEYS.CACHED_BOOKS, {});
       const bookKeys = listBooks[listId] || [];
@@ -756,6 +803,7 @@ export class DatabaseService {
    */
   async getListsContainingBook(bookKey: string): Promise<CustomList[]> {
     if (!this.hasDb()) {
+      // Fallback: buscar en localStorage
       const lists = this.getFromStorage<CustomList[]>(STORAGE_KEYS.LISTS, []);
       const listBooks = this.getFromStorage<{[id: string]: string[]}>(STORAGE_KEYS.LIST_BOOKS, {});
       return lists.filter(list => (listBooks[list.id] || []).includes(bookKey)).map(list => ({

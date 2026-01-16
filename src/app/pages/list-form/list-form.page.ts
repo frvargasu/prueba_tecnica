@@ -29,31 +29,30 @@ import { CustomListService, DatabaseService } from '../../services';
     <ion-content class="ion-padding">
       <form [formGroup]="listForm" (ngSubmit)="onSubmit()">
         <!-- Name Input -->
-        <ion-item [class.ion-invalid]="isFieldInvalid('name')">
-          <ion-label position="stacked">Nombre de la lista *</ion-label>
+        <ion-item fill="outline" [class.ion-invalid]="isFieldInvalid('name')">
+          <ion-label position="floating">Nombre de la lista *</ion-label>
           <ion-input
+            type="text"
             formControlName="name"
-            placeholder="Ej: Favoritos de ciencia ficción"
+            placeholder="Ej: Favoritos"
             [maxlength]="maxNameLength"
-            [counter]="true"
           ></ion-input>
-          <ion-note slot="helper">
-            Mínimo {{ minNameLength }} caracteres, máximo {{ maxNameLength }}
-          </ion-note>
-          <ion-note slot="error" *ngIf="getFieldError('name')">
-            {{ getFieldError('name') }}
-          </ion-note>
         </ion-item>
+        <div class="field-hint">
+          Mínimo {{ minNameLength }} caracteres, máximo {{ maxNameLength }}. Este campo es obligatorio.
+        </div>
+        <div class="field-error" *ngIf="getFieldError('name')">
+          {{ getFieldError('name') }}
+        </div>
 
         <!-- Description Input -->
-        <ion-item>
-          <ion-label position="stacked">Descripción (opcional)</ion-label>
+        <ion-item fill="outline">
+          <ion-label position="floating">Descripción (opcional)</ion-label>
           <ion-textarea
             formControlName="description"
-            placeholder="Una breve descripción de tu lista..."
+            placeholder="Puedes crear hasta 3 listas"
             [rows]="3"
             [maxlength]="200"
-            [counter]="true"
           ></ion-textarea>
         </ion-item>
 
@@ -105,8 +104,28 @@ import { CustomListService, DatabaseService } from '../../services';
   `,
   styles: [`
     ion-item {
-      --padding-start: 0;
-      margin-bottom: 16px;
+      margin-bottom: 8px;
+      --background: var(--ion-color-light);
+    }
+
+    ion-item ion-input,
+    ion-item ion-textarea {
+      --padding-start: 12px;
+      --padding-end: 12px;
+      --padding-top: 12px;
+      --padding-bottom: 12px;
+    }
+
+    .field-hint {
+      font-size: 12px;
+      color: var(--ion-color-medium);
+      margin: 4px 0 16px 0;
+    }
+
+    .field-error {
+      font-size: 12px;
+      color: var(--ion-color-danger);
+      margin: 4px 0 16px 0;
     }
 
     .validation-info {

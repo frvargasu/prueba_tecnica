@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { IonicModule, ViewWillEnter, InfiniteScrollCustomEvent, IonSearchbar } from '@ionic/angular';
+import { IonicModule, ViewWillEnter, InfiniteScrollCustomEvent, IonInput } from '@ionic/angular';
 import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
 import { Book, ViewState, NetworkStatus } from '../../models';
 import { BookService, NetworkService, CustomListService } from '../../services';
@@ -35,17 +35,6 @@ import {
         </ion-buttons>
         <ion-title>Buscar libros</ion-title>
       </ion-toolbar>
-      <ion-toolbar>
-        <ion-searchbar
-          #searchbar
-          [(ngModel)]="searchQuery"
-          (ionInput)="onSearchInput($event)"
-          (ionClear)="onClearSearch()"
-          placeholder="Buscar por título o autor..."
-          [debounce]="500"
-          animated
-        ></ion-searchbar>
-      </ion-toolbar>
     </ion-header>
 
     <ion-content>
@@ -53,6 +42,24 @@ import {
         [isOffline]="!networkStatus.connected"
         [message]="offlineMessage"
       ></app-offline-banner>
+
+      <!-- Search Input -->
+      <div class="search-container">
+        <ion-item fill="outline" class="search-item">
+          <ion-icon name="search-outline" slot="start"></ion-icon>
+          <ion-input
+            #searchInput
+            type="text"
+            [(ngModel)]="searchQuery"
+            (ionInput)="onSearchInput($event)"
+            placeholder="Buscar por título o autor..."
+            [clearInput]="true"
+          ></ion-input>
+        </ion-item>
+        <ion-button (click)="performSearch()" [disabled]="!searchQuery || searchQuery.length < 2">
+          Buscar
+        </ion-button>
+      </div>
 
       <!-- Initial State (no search) -->
       <div *ngIf="viewState === ViewState.EMPTY && !hasSearched" class="initial-state">
@@ -137,6 +144,24 @@ import {
     ></ion-toast>
   `,
   styles: [`
+    .search-container {
+      display: flex;
+      gap: 8px;
+      padding: 16px;
+      background: var(--ion-background-color);
+      border-bottom: 1px solid var(--ion-color-light);
+    }
+
+    .search-item {
+      flex: 1;
+      --background: var(--ion-color-light);
+    }
+
+    .search-container ion-button {
+      --padding-start: 16px;
+      --padding-end: 16px;
+    }
+
     .initial-state {
       display: flex;
       flex-direction: column;
@@ -178,7 +203,7 @@ import {
   `]
 })
 export class SearchPage implements OnInit, OnDestroy, ViewWillEnter {
-  @ViewChild('searchbar') searchbar!: IonSearchbar;
+  @ViewChild('searchInput') searchInput!: IonInput;
 
   ViewState = ViewState;
 
@@ -238,9 +263,9 @@ export class SearchPage implements OnInit, OnDestroy, ViewWillEnter {
   }
 
   ionViewWillEnter(): void {
-    // Focus searchbar when entering
+    // Focus search input when entering
     setTimeout(() => {
-      this.searchbar?.setFocus();
+      this.searchInput?.setFocus();
     }, 100);
   }
 

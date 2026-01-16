@@ -182,6 +182,14 @@ import { OfflineBannerComponent } from '../../components';
       flex-direction: column;
       gap: 12px;
       padding: 16px 0;
+      margin-top: 8px;
+    }
+
+    .quick-actions ion-button {
+      --border-radius: 8px;
+      --border-width: 2px;
+      height: 48px;
+      font-weight: 600;
     }
 
     @media (min-width: 500px) {
